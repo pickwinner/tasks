@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Daily Tasks</title>
+
+<style>
+    body {
+        margin: 0;
+        padding: 0;
+        background: #000000;
+        color: #ffffff;
+        font-family: Arial, Helvetica, sans-serif;
+        -webkit-font-smoothing: antialiased;
+    }
+
+    .container {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 40px 20px;
+    }
+
+    h1#dateDisplay {
+        font-size: 42px;
+        font-weight: 800;
+        margin-bottom: 25px;
+        letter-spacing: -1px;
+    }
+
+    #taskInput {
+        width: 100%;
+        padding: 16px 18px;
+        font-size: 18px;
+        background: #0d0d0d;
+        color: white;
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 10px;
+        outline: none;
+        margin-bottom: 25px;
+    }
+
+    #taskInput::placeholder {
+        color: rgba(255,255,255,0.35);
+    }
+
+    ul {
+        padding: 0;
+        margin: 0;
+        list-style: none;
+    }
+
+    li.taskItem {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 14px 8px;
+        margin-bottom: 8px;
+        border-radius: 8px;
+        transition: background 0.15s;
+    }
+
+    li.taskItem:hover {
+        background: rgba(255,255,255,0.07);
+    }
+
+    input[type="checkbox"] {
+        width: 22px;
+        height: 22px;
+        cursor: pointer;
+        accent-color: white;
+    }
+
+    label.taskLabel {
+        flex: 1;
+        font-size: 20px;
+        cursor: pointer;
+        position: relative;
+        display: inline-block;
+        padding-bottom: 3px;
+    }
+
+    /* Smooth crossout animation */
+    label.taskLabel.done::after {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 50%;
+        height: 2px;
+        background: white;
+        width: 0%;
+        animation: strike 0.35s forwards ease-out;
+    }
+
+    @keyframes strike {
+        from { width: 0%; }
+        to   { width: 100%; }
+    }
+
+    .deleteBtn {
+        background: transparent;
+        border: none;
+        color: rgba(255,255,255,0.4);
+        cursor: pointer;
+        font-size: 20px;
+        padding: 6px 10px;
+    }
+
+    .deleteBtn:hover {
+        color: white;
+    }
+
+</style>
+</head>
+<body>
+
+<div class="container">
+    <h1 id="dateDisplay">Loading...</h1>
+
+    <input id="taskInput" placeholder="Type a task and press Enter..." />
+
+    <ul id="taskList"></ul>
+</div>
+
+<script>
+/* ---------------- CONFIG ---------------- */
+const API_URL = "https://script.google.com/macros/s/AKfycbw8fvA1ZdpIaaHyh3pnaUyKXvM9-bLWTEDwFXwogcegReU1XAx6e8t_vNetEAvtWwfxoA/exec";
+/* ---------------------------------------- */
+
+
+// Helper GET request
+async function apiGet(params = {}) {
+    const url = new URL(API_URL);
+    Object.keys(params).forEach(k => url.searchParams.append(k, params[k]));
+    const res = await fetch(url);
+    return res.json();
+}
+
+// Helper POST request
+async function apiPost(data = {}) {
+    const res = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data)
+    });
+    return res.json();
+}
+
+/* ---------- UI + Logic ---------- */
+
+const dateDisplay = document.getElementById("dateDisplay");
+const taskList = document.getElementById("taskList");
+const taskInput = document.getElementById("taskInput");
+
+let currentDateISO = null;
+
+// Load date + tasks on startup
+async function loadPage() {
+    const status = await apiGet({ action: "status" });
+    currentDateISO = status.dateISO;
+    dateDisplay.textContent = status.dateDisplay;
+
+    const loaded = await apiGet({ action: "load", date: currentDateISO });
+    taskList.innerHTML = "";
+
+    loaded.items.forEach(item => {
+        addTaskToDOM(item.task, item.done, item.row);
+    });
+}
+
+function addTaskToDOM(text, done, row) {
+    const li = document.createElement("li");
+    li.className = "taskItem";
+
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = done;
+
+    const label = document.createElement("label");
+    label.className = "taskLabel";
+    label.textContent = text;
+    if (done) label.classList.add("done");
+
+    const del = document.createElement("button");
+    del.className = "deleteBtn";
+    del.innerHTML = "✕";
+
+    // Checkbox toggle
+    cb.addEventListener("change", async () => {
+        if (cb.checked) label.classList.add("done");
+        else label.classList.remove("done");
+
+        await apiPost({
+            action: "toggle",
+            row: row
+        });
+    });
+
+    // Delete task
+    del.addEventListener("click", async () => {
+        await apiPost({
+            action: "delete",
+            row: row
+        });
+        li.remove();
+    });
+
+    // Double-click to edit
+    label.addEventListener("dblclick", async () => {
+        const newText = prompt("Edit task", text);
+        if (!newText) return;
+
+        label.textContent = newText;
+        await apiPost({
+            action: "update",
+            row: row,
+            task: newText,
+            done: cb.checked
+        });
+    });
+
+    li.appendChild(cb);
+    li.appendChild(label);
+    li.appendChild(del);
+    taskList.appendChild(li);
+}
+
+// Add new task on Enter
+taskInput.addEventListener("keydown", async e => {
+    if (e.key === "Enter") {
+        const txt = taskInput.value.trim();
+        if (txt.length === 0) return;
+
+        await apiPost({
+            action: "add",
+            date: currentDateISO,
+            task: txt,
+            done: false
+        });
+
+        // Reload page to get new row number
+        await loadPage();
+        taskInput.value = "";
+    }
+});
+
+// Initial load
+loadPage();
+</script>
+
+</body>
+</html>
