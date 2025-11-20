@@ -9,10 +9,9 @@
     body {
         margin: 0;
         padding: 0;
-        background: #000000;
-        color: #ffffff;
+        background: #000;
+        color: #fff;
         font-family: Arial, Helvetica, sans-serif;
-        -webkit-font-smoothing: antialiased;
     }
 
     .container {
@@ -21,11 +20,10 @@
         padding: 40px 20px;
     }
 
-    h1#dateDisplay {
+    h1 {
         font-size: 42px;
         font-weight: 800;
         margin-bottom: 25px;
-        letter-spacing: -1px;
     }
 
     #taskInput {
@@ -55,13 +53,8 @@
         align-items: center;
         gap: 14px;
         padding: 14px 8px;
-        margin-bottom: 8px;
+        margin-bottom: 6px;
         border-radius: 8px;
-        transition: background 0.15s;
-    }
-
-    li.taskItem:hover {
-        background: rgba(255,255,255,0.07);
     }
 
     input[type="checkbox"] {
@@ -71,73 +64,50 @@
         accent-color: white;
     }
 
-    label.taskLabel {
+    label {
         flex: 1;
         font-size: 20px;
         cursor: pointer;
         position: relative;
-        display: inline-block;
-        padding-bottom: 3px;
     }
 
-    /* Smooth crossout animation */
-    label.taskLabel.done::after {
+    /* Smooth strike-through */
+    label.done::after {
         content: "";
         position: absolute;
         left: 0;
-        top: 50%;
+        top: 55%;
+        width: 100%;
         height: 2px;
         background: white;
-        width: 0%;
-        animation: strike 0.35s forwards ease-out;
+        animation: strike 0.3s ease-out;
     }
 
     @keyframes strike {
         from { width: 0%; }
-        to   { width: 100%; }
+        to { width: 100%; }
     }
-
-    .deleteBtn {
-        background: transparent;
-        border: none;
-        color: rgba(255,255,255,0.4);
-        cursor: pointer;
-        font-size: 20px;
-        padding: 6px 10px;
-    }
-
-    .deleteBtn:hover {
-        color: white;
-    }
-
 </style>
 </head>
 <body>
 
 <div class="container">
     <h1 id="dateDisplay">Loading...</h1>
-
     <input id="taskInput" placeholder="Type a task and press Enter..." />
-
     <ul id="taskList"></ul>
 </div>
 
 <script>
-/* ---------------- CONFIG ---------------- */
 const API_URL = "https://script.google.com/macros/s/AKfycbw8fvA1ZdpIaaHyh3pnaUyKXvM9-bLWTEDwFXwogcegReU1XAx6e8t_vNetEAvtWwfxoA/exec";
-/* ---------------------------------------- */
 
-
-// Helper GET request
-async function apiGet(params = {}) {
+async function apiGet(params) {
     const url = new URL(API_URL);
     Object.keys(params).forEach(k => url.searchParams.append(k, params[k]));
     const res = await fetch(url);
     return res.json();
 }
 
-// Helper POST request
-async function apiPost(data = {}) {
+async function apiPost(data) {
     const res = await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -146,86 +116,47 @@ async function apiPost(data = {}) {
     return res.json();
 }
 
-/* ---------- UI + Logic ---------- */
-
 const dateDisplay = document.getElementById("dateDisplay");
-const taskList = document.getElementById("taskList");
 const taskInput = document.getElementById("taskInput");
+const taskList = document.getElementById("taskList");
 
 let currentDateISO = null;
 
-// Load date + tasks on startup
-async function loadPage() {
+async function loadTasks() {
     const status = await apiGet({ action: "status" });
     currentDateISO = status.dateISO;
     dateDisplay.textContent = status.dateDisplay;
 
-    const loaded = await apiGet({ action: "load", date: currentDateISO });
-    taskList.innerHTML = "";
+    const data = await apiGet({ action: "load", date: currentDateISO });
 
-    loaded.items.forEach(item => {
-        addTaskToDOM(item.task, item.done, item.row);
-    });
+    taskList.innerHTML = "";
+    data.items.forEach(item => renderTask(item));
 }
 
-function addTaskToDOM(text, done, row) {
+function renderTask(item) {
     const li = document.createElement("li");
     li.className = "taskItem";
 
     const cb = document.createElement("input");
     cb.type = "checkbox";
-    cb.checked = done;
+    cb.checked = item.done;
 
     const label = document.createElement("label");
-    label.className = "taskLabel";
-    label.textContent = text;
-    if (done) label.classList.add("done");
+    label.textContent = item.task;
+    if (item.done) label.classList.add("done");
 
-    const del = document.createElement("button");
-    del.className = "deleteBtn";
-    del.innerHTML = "✕";
-
-    // Checkbox toggle
     cb.addEventListener("change", async () => {
         if (cb.checked) label.classList.add("done");
         else label.classList.remove("done");
 
-        await apiPost({
-            action: "toggle",
-            row: row
-        });
+        await apiPost({ action: "toggle", row: item.row });
+        loadTasks();
     });
 
-    // Delete task
-    del.addEventListener("click", async () => {
-        await apiPost({
-            action: "delete",
-            row: row
-        });
-        li.remove();
-    });
-
-    // Double-click to edit
-    label.addEventListener("dblclick", async () => {
-        const newText = prompt("Edit task", text);
-        if (!newText) return;
-
-        label.textContent = newText;
-        await apiPost({
-            action: "update",
-            row: row,
-            task: newText,
-            done: cb.checked
-        });
-    });
-
-    li.appendChild(cb);
-    li.appendChild(label);
-    li.appendChild(del);
+    li.append(cb, label);
     taskList.appendChild(li);
 }
 
-// Add new task on Enter
 taskInput.addEventListener("keydown", async e => {
     if (e.key === "Enter") {
         const txt = taskInput.value.trim();
@@ -238,14 +169,12 @@ taskInput.addEventListener("keydown", async e => {
             done: false
         });
 
-        // Reload page to get new row number
-        await loadPage();
         taskInput.value = "";
+        setTimeout(loadTasks, 200);
     }
 });
 
-// Initial load
-loadPage();
+loadTasks();
 </script>
 
 </body>
